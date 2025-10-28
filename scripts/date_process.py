@@ -1,15 +1,60 @@
 import os
 import re
 import csv
+import pandas as pd
 
-FINAL_FOLDER = "data/final_sub_swps"  # folder with sub-SWP text files
+FINAL_FOLDER = "data/final_sub_swps"
+INDEX_FILE = "data/metadata/trials_index.csv"
 OUTPUT_CSV = "data/trials_summary.csv"
 
-# regex patterns
-swp_pattern = re.compile(r'(SWP No\. \d+\.\d+)', re.IGNORECASE)
-date_pattern = re.compile(r'\[([^\]]+)\]')  # text in brackets, e.g., [May 31, 1692]
+# --- Load Accused/Topic mapping safely ---
+index_df = pd.read_csv(INDEX_FILE)
+
+# Try to find SWP column automatically (now handles uppercase/lowercase)
+possible_cols = ["SWP No.", "SWP_no", "SWP_No", "SWP", "swp_no"]
+swp_col = next((c for c in index_df.columns if c in possible_cols), None)
+if swp_col is None:
+    raise KeyError(f"❌ Could not find any SWP column in metadata file. Found columns: {list(index_df.columns)}")
+
+# Find accused/topic column
+accused_col = next((c for c in index_df.columns if "Accused" in c or "Topic" in c), None)
+if accused_col is None:
+    raise KeyError(f"❌ Could not find accused/topic column in metadata file. Found columns: {list(index_df.columns)}")
+
+# Build mapping — normalize SWP numbers
+index_map = {}
+for _, row in index_df.iterrows():
+    swp_val = str(row[swp_col]).strip()
+    if pd.isna(swp_val) or not swp_val:
+        continue
+    main_num_match = re.search(r'(\d+)', swp_val)
+    if main_num_match:
+        main_num = main_num_match.group(1).zfill(3)  # standardize to 3 digits (e.g., 005)
+        index_map[main_num] = str(row[accused_col]).strip()
+
+# --- Regex patterns ---
+swp_pattern = re.compile(r'(SWP No\. ?\d+\.\d+)', re.IGNORECASE)
+date_pattern = re.compile(r'\[+ *([\+\-A-Za-z0-9, ]+?) *\]+')
+clean_legal_type = re.compile(r'[\(\)]')
+prepositions = {"of", "for", "to", "from", "pertaining"}
 
 rows = []
+
+def normalize_legal_type(raw_line):
+    if not raw_line:
+        return ""
+    line = clean_legal_type.sub("", raw_line).strip()
+    words = [w.lower() for w in line.split() if w.lower() not in prepositions]
+    if not words:
+        return ""
+    return words[0].capitalize()
+
+def clean_dates_from_text(text):
+    matches = date_pattern.findall(text)
+    if not matches:
+        return ""
+    cleaned = [m.replace("+", "").replace("++", "").strip() for m in matches]
+    return ", ".join(cleaned)
 
 for fname in os.listdir(FINAL_FOLDER):
     if not fname.endswith(".txt"):
@@ -20,43 +65,54 @@ for fname in os.listdir(FINAL_FOLDER):
 
     lines = [line.strip() for line in content.splitlines() if line.strip()]
 
-    # SWP No.
+    # --- SWP No ---
     swp_no = ""
-    legal_type = ""
     idx = 0
     for i, line in enumerate(lines):
-        swp_match = swp_pattern.match(line)
-        if swp_match:
-            swp_no = swp_match.group(1)
+        match = swp_pattern.match(line)
+        if match:
+            swp_no = match.group(1)
             idx = i
             break
 
-    # Legal proceeding type is the next line after SWP No.
+    if not swp_no:
+        print(f"⚠️ No SWP number found in {fname}")
+        continue
+
+    # Extract main number (e.g., from SWP No. 5.1 → 005)
+    main_match = re.search(r'SWP No\. ?(\d+)', swp_no, re.IGNORECASE)
+    main_num = main_match.group(1).zfill(3) if main_match else None
+
+    # --- Legal proceeding type ---
+    legal_type = ""
     if idx + 1 < len(lines):
-        legal_type = lines[idx + 1]
+        legal_type = normalize_legal_type(lines[idx + 1])
 
-    # Date (first [ ... ] in file)
-    date_match = date_pattern.search(content)
-    date = date_match.group(1) if date_match else ""
+    # --- Dates ---
+    date = clean_dates_from_text(content)
 
-    # Accused / topic (heuristic: first capitalized name after SWP No. and legal type)
-    accused = ""
-    for line in lines[idx + 2: idx + 12]:  # look in next ~10 lines
-        name_match = re.search(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)', line)
-        if name_match:
-            accused = name_match.group(1)
-            break
+    # --- Accused/topic from metadata ---
+    accused = index_map.get(main_num, "")
 
-    # Full trial text
-    trial_text = content.replace("\n", " ").strip()
+    # --- Trial text (remove SWP No. line only) ---
+    trial_text = " ".join(lines[idx + 1:]).strip()
 
     rows.append([swp_no, accused, date, legal_type, trial_text])
 
-# Write to CSV
+# --- Sort rows numerically by SWP number ---
+def swp_sort_key(row):
+    m = re.search(r'(\d+)\.(\d+)', row[0])
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+    return (9999, 9999)
+
+rows.sort(key=swp_sort_key)
+
+# --- Write CSV ---
 os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
 with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
     writer.writerow(["SWP_No", "Accused_or_Topic", "Date", "Legal_Proceeding", "Trial_Text"])
     writer.writerows(rows)
 
-print(f"CSV file created: {OUTPUT_CSV}")
+print(f"✅ CSV file created successfully: {OUTPUT_CSV}")
