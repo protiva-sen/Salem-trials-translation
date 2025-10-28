@@ -5,7 +5,7 @@ import pandas as pd
 
 FINAL_FOLDER = "data/final_sub_swps"
 INDEX_FILE = "data/metadata/trials_index.csv"
-OUTPUT_CSV = "data/trials_summary.csv"
+OUTPUT_CSV = "data/metadata/trials_summary.csv"
 
 # --- Load Accused/Topic mapping safely ---
 index_df = pd.read_csv(INDEX_FILE)
@@ -34,7 +34,7 @@ for _, row in index_df.iterrows():
 
 # --- Regex patterns ---
 swp_pattern = re.compile(r'(SWP No\. ?\d+\.\d+)', re.IGNORECASE)
-date_pattern = re.compile(r'\[+ *([\+\-A-Za-z0-9, ]+?) *\]+')
+
 clean_legal_type = re.compile(r'[\(\)]')
 prepositions = {"of", "for", "to", "from", "pertaining"}
 
@@ -49,13 +49,50 @@ def normalize_legal_type(raw_line):
         return ""
     return words[0].capitalize()
 
-def clean_dates_from_text(text):
-    matches = date_pattern.findall(text)
+date_pattern = re.compile(
+    r"""
+    \[                         # opening bracket
+    \s*
+    (?:\+{1,2}\s*)?            # optional leading + or ++ and space
+    (January|February|March|April|May|June|July|August|September|October|November|December)
+    (?:\s+\d{1,2})?            # optional day (e.g., 31)
+    (?:,\s*\d{4}|\s+\d{4})     # comma+year or space+year (handles "May 31, 1692" and "February 1692")
+    \s*                        # optional whitespace
+    [\.\?\,]*                  # optional trailing punctuation (.,? , etc.) possibly multiple
+    \s*
+    \]                         # closing bracket
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+def clean_dates_from_text(text: str, return_all: bool = False) -> str:
+    """
+    Extracts and normalizes dates found in bracketed forms.
+    - Strips leading +/++ and trailing punctuation (., ?, spaces) while keeping the date.
+    - Returns a comma-joined string of all dates found when return_all=True.
+    - By default returns the first matched date.
+    Examples returned: "May 31, 1692", "February 1692", "September 7, 1692"
+    """
+    matches = list(re.finditer(date_pattern, text))
     if not matches:
         return ""
-    cleaned = [m.replace("+", "").replace("++", "").strip() for m in matches]
-    return ", ".join(cleaned)
 
+    cleaned_dates = []
+    for m in matches:
+        raw = m.group(0)            # full bracketed match, e.g. "[+ May 31, 1692 ?]"
+        # remove brackets, leading +/++, trailing punctuation and extra spaces
+        s = raw.strip("[]").strip()
+        s = re.sub(r'^\+{1,2}\s*', '', s)   # drop leading + or ++
+        s = re.sub(r'[\.\?,\s]*$', '', s)   # drop trailing .,? and spaces
+        s = re.sub(r'\s+', ' ', s).strip()  # collapse multiple spaces
+        cleaned_dates.append(s)
+
+    if return_all:
+        # join multiple dates with comma + space
+        return ", ".join(cleaned_dates)
+    else:
+        return cleaned_dates[0]
+    
 for fname in os.listdir(FINAL_FOLDER):
     if not fname.endswith(".txt"):
         continue
