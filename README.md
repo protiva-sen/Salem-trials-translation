@@ -1,6 +1,6 @@
 # Salem Trials Translation
 
-A Python-based ETL pipeline for collecting and structuring the **Salem Witchcraft Papers (SWP)** corpus from the University of Virginia Salem archive.
+A Python-based ETL (Extract, Transform, Load) pipeline for collecting and structuring the **Salem Witchcraft Papers (SWP)** corpus from the University of Virginia Salem archive.
 
 ## What this project does
 
