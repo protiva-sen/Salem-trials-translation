@@ -6,5 +6,9 @@ __pycache__/
 config.json
 */.ipynb_checkpoints/
 *.txt conda activate hashtag-hijacking
-
-
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+*-checkpoint.ipynb
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+*-checkpoint.ipynb
