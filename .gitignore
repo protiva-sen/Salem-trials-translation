@@ -7,4 +7,4 @@ config.json
 */.ipynb_checkpoints/
 .ipynb_checkpoints/
 *-checkpoint.ipynb
-
+*.jsonl
